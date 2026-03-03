@@ -13,7 +13,7 @@ allowed-tools: [mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp
 ## ⚙️ 設定（初回のみ編集してください）
 
 ```
-DATABASE_URL: SETUP_REQUIRED
+DATABASE_URL: https://www.notion.so/earth-sherpa/173deb5fc5da80b1b650e8af4cecbeb3?v=191deb5fc5da80c98e0c000c439373c6&source=copy_link
 PROP_TITLE:     タスク名
 PROP_ASSIGNEE:  担当者
 PROP_STATUS:    ステータス
