@@ -1,0 +1,8 @@
+{
+  "name": "notion-mytasks",
+  "description": "Notion のタスクデータベースから自分にアサインされたタスクを管理する /mytasks コマンド",
+  "author": {
+    "name": "EarthSherpa",
+    "url": "https://github.com/EarthSherpa"
+  }
+}
