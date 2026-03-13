@@ -1,7 +1,7 @@
 ---
 description: Notion タスク一覧の表示・追加・完了・ステータス変更・削除
 argument-hint: [list|all|add <名前>|done <名前/番号>|status <名前/番号> <値>|delete <名前/番号>]
-allowed-tools: [mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-search, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-fetch, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-create-pages, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-update-page]
+allowed-tools: [Bash, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-fetch, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-create-pages, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-update-page]
 ---
 
 # /mytasks - Notion タスク管理
@@ -14,6 +14,7 @@ allowed-tools: [mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp
 
 ```
 DATABASE_URL: https://www.notion.so/earth-sherpa/173deb5fc5da80b1b650e8af4cecbeb3?v=191deb5fc5da80c98e0c000c439373c6&source=copy_link
+DB_ID:        173deb5fc5da80b1b650e8af4cecbeb3
 PROP_TITLE:     Task Name
 PROP_ASSIGNEE:  Assignee
 PROP_STATUS:    Status
@@ -27,8 +28,8 @@ STATUS_ARCHIVED_VALUES: Archived
 STATUS_OTHER_VALUES:    Paused, Blocked
 ```
 
-> **DATABASE_URL の設定方法**: Notion でタスクデータベースを開き、URL（例: `https://www.notion.so/...`）をコピーして `SETUP_REQUIRED` と置き換えてください。
-> **プロパティ名**: 自分の Notion DB のプロパティ名と合わない場合は上記の各 PROP_* を修正してください。
+> **前提条件**: `~/.claude/scripts/notion_tasks.py` が存在すること（GitHub リポジトリに同梱）。
+> Notion Integration Token を `~/.notion_token` に保存しておくこと（詳細は README 参照）。
 > **Notion MCP UUID**: `allowed-tools` の UUID（`1a4cd6f2-d31d-4d15-9817-259147b769eb`）が自分の環境と異なる場合はこのファイルの UUID を全て置換してください。
 
 ---
@@ -37,11 +38,7 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 
 ### Step 1: 設定チェック
 
-設定の `DATABASE_URL` が `SETUP_REQUIRED` のままであれば初期セットアップを実行する:
-
-1. `notion-search` で `query: "タスク"` を実行し、データベース候補を最大5件表示する
-2. 「どのデータベースを使いますか？番号で選択してください」と提示する
-3. ユーザーが選択したら「このファイルの `DATABASE_URL:` を選択したURLに書き換えてください」と案内して終了する
+設定の `DATABASE_URL` が `SETUP_REQUIRED` のままであれば、ユーザーに設定方法を案内して終了する。
 
 設定済みの場合は Step 2 へ進む。
 
@@ -55,18 +52,17 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 
 **判定順序（上から順に評価）:**
 
-1. **SETUP**: `$ARGUMENTS` が空 かつ `DATABASE_URL` が `SETUP_REQUIRED` → Step 1 へ
-2. **VIEW-ALL**: `all`, `すべて`, `全部` を含む
-3. **ADD**: `add`, `追加`, `新規`, `create`, `new`, `作成`, `作って`, `入れて` を含む
-4. **DELETE**: `delete`, `削除`, `消して`, `remove`, `消す` を含む
-5. **DEADLINE**: `期限変更`, `due`, `deadline`, `〆切`, `締め切り` を含む（ただし `add` と共存する場合は ADD モードで処理）
-6. **STATUS**: 以下のいずれかに該当する
+1. **VIEW-ALL**: `all`, `すべて`, `全部` を含む
+2. **ADD**: `add`, `追加`, `新規`, `create`, `new`, `作成`, `作って`, `入れて` を含む
+3. **DELETE**: `delete`, `削除`, `消して`, `remove`, `消す` を含む
+4. **DEADLINE**: `期限変更`, `due`, `deadline`, `〆切`, `締め切り` を含む（ただし `add` と共存する場合は ADD モードで処理）
+5. **STATUS**: 以下のいずれかに該当する
    - `status`, `ステータス`, `move`, `移動` キーワードを含む
    - `→` を含む（例: `1 → 保留`）
    - 設定の全 STATUS_*_VALUES に含まれる値 + タスク名/番号の組み合わせ（例: `archived 1`, `保留 レポート`）
-7. **DONE**: `done`, `完了`, `終わった`, `finish`, `finished`, `済み`, `ok`, `やった` を含み、かつタスク名または番号が続く
-8. **VIEW-FILTER**: 設定の STATUS_*_VALUES に含まれる値**のみ**（タスク名/番号なし）（例: `完了`, `archived`, `保留`）
-9. **VIEW**: `$ARGUMENTS` が空、または `list`, `一覧`, `show`, `表示`, `ls` を含む
+6. **DONE**: `done`, `完了`, `終わった`, `finish`, `finished`, `済み`, `ok`, `やった` を含み、かつタスク名または番号が続く
+7. **VIEW-FILTER**: 設定の STATUS_*_VALUES に含まれる値**のみ**（タスク名/番号なし）（例: `完了`, `archived`, `保留`）
+8. **VIEW**: `$ARGUMENTS` が空、または `list`, `一覧`, `show`, `表示`, `ls` を含む
 
 ---
 
@@ -74,28 +70,43 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 
 ### VIEW / VIEW-ALL / VIEW-FILTER モード
 
-**データ取得:**
+**データ取得（Python スクリプト経由）:**
+
+モードに応じて以下の Bash コマンドを実行する:
+
+```bash
+# VIEW（アクティブのみ）
+python3 ~/.claude/scripts/notion_tasks.py \
+  --db-id {DB_ID} --user-id {MY_USER_ID} \
+  --status "Not started" "In progress" --format json
+
+# VIEW-ALL（全ステータス）
+python3 ~/.claude/scripts/notion_tasks.py \
+  --db-id {DB_ID} --user-id {MY_USER_ID} --format json
+
+# VIEW-FILTER（指定ステータス）
+python3 ~/.claude/scripts/notion_tasks.py \
+  --db-id {DB_ID} --user-id {MY_USER_ID} \
+  --status {指定ステータス値...} --format json
 ```
-1. notion-fetch(id=DATABASE_URL) を実行して <data-source url="collection://..."> タグから data_source_id を取得
-2. notion-search(query=" ", data_source_url="collection://{data_source_id}") で全ページを取得
-   ※ query="" は API エラーになるため必ず1文字以上を指定する（空白1文字で全件取得できる）
-   ※ レスポンスに continuation トークンがあれば続けて取得し、全ページを集める
-3. 以下の条件でフィルタリング:
-   - PROP_ASSIGNEE プロパティの値に MY_USER_ID が含まれる
-     ※ People プロパティは "user://USER_ID" 形式または mention-user タグで格納される。
-       MY_USER_ID の文字列が値中に含まれているかを確認する。
-   - ステータス条件（モードによる）:
-     - VIEW:        STATUS_ACTIVE_VALUES に含まれる
-     - VIEW-ALL:    フィルタなし（全ステータス）
-     - VIEW-FILTER: 指定されたステータス値を含むカテゴリで絞り込む
+
+スクリプトは JSON 配列を出力する。各要素の構造:
+```json
+{"id": "page-uuid", "title": "タスク名", "status": "In progress",
+ "deadline": "2026-03-10", "priority": "High", "project": "営業"}
 ```
+
+このリストを `#1`, `#2`, ... として番号付けし、後続の操作で参照できるよう保持する。
+
+**エラー時**: `~/.notion_token` が存在しない場合、スクリプトがセットアップ手順を stderr に出力する。
+その内容をユーザーに表示し終了する。
 
 **表示フォーマット（VIEW / VIEW-FILTER）:**
 ```
 | # | タスク | プロジェクト | 期限 | 優先度 |
 |---|--------|------------|------|-------|
-| 1 | レポート作成 | 営業部 | 2026/03/10 | 高 |
-| 2 | 会議準備 | 総務 | 2026/03/15 | 中 |
+| 1 | レポート作成 | 営業部 | 2026/03/10 | High |
+| 2 | 会議準備 | 総務 | 2026/03/15 | Medium |
 | 3 | 請求書確認 | 経理 | - | - |
 （番号はこのセッション中のみ有効です）
 ```
@@ -104,9 +115,8 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 ```
 | # | タスク | プロジェクト | 期限 | 優先度 | ステータス |
 |---|--------|------------|------|-------|-----------|
-| 1 | レポート作成 | 営業部 | 2026/03/10 | 高 | 進行中 |
-| 2 | 議事録 | 総務 | - | - | 完了 |
-| 3 | 確認作業 | 経理 | - | 低 | アーカイブ |
+| 1 | レポート作成 | 営業部 | 2026/03/10 | High | In progress |
+| 2 | 議事録 | 総務 | - | - | Done |
 （番号はこのセッション中のみ有効です）
 ```
 
@@ -114,23 +124,31 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 
 ---
 
+### タスク特定（共通ヘルパー）
+
+DONE / STATUS / DEADLINE / DELETE モードで使用する。
+
+```
+- 数字のみ / `#N` → セッション内の番号対応（VIEW で表示済みリストの page_id を使用）
+- 名前指定 → Python スクリプトを json モードで実行し、title の部分一致（大文字小文字無視）でタスクを探す
+  ※ 全ステータスから検索: --status オプションなし
+- 複数一致 → 候補リストを表示して選択を求める
+- セッションにリストがなく番号指定の場合 → VIEW モードを実行してリストを取得してから番号を確定する
+```
+
+---
+
 ### DONE モード（差分表示）
 
 > **トークン節約**: 操作後はテーブルを再描画せず、1行確認のみ表示する。
 
-**タスク特定:**
-- 数字のみ / `#N` → セッション内の番号対応（VIEW で表示済みリストを参照）
-- 名前 → PROP_ASSIGNEE=MY_USER_ID かつ STATUS_ACTIVE_VALUES のタスクから部分一致で検索
-- 複数一致 → 候補リストを表示して選択を求める
-- セッションにリストがなく番号指定の場合 → 先にタスク一覧を取得して番号を確定してから処理
-
-**処理:**
 ```
-notion-update-page(
-  page_id: {対象ページID},
-  command: "update_properties",
-  properties: { "{PROP_STATUS}": "{STATUS_DONE_VALUES の最初の値}" }
-)
+1. タスク特定（上記共通ヘルパー参照）
+2. notion-update-page(
+     page_id: {対象ページID},
+     command: "update_properties",
+     properties: { "Status": "Done" }
+   )
 ```
 
 **出力（1行のみ）:**
@@ -146,33 +164,31 @@ notion-update-page(
 > DONE モードの一般化。任意のステータス値へ変更できる。
 
 **自然言語パターン例:**
-- `status 1 アーカイブ` / `status レポート 保留`
-- `1 → アーカイブ` / `レポート → 進行中`
-- `move 2 to 保留`
-- `archived 1` / `1 archived` / `保留 レポート`
-- `レポートをアーカイブして` / `2を進行中に変更`
+- `status 1 Archived` / `status レポート Paused`
+- `1 → Archived` / `レポート → In progress`
+- `move 2 to Paused`
+- `Archived 1` / `1 Archived` / `Paused レポート`
 
 **引数解析:**
 - `→` の左がタスク指定、右が新ステータス
 - `status` / `move` / `ステータス` の後: タスク指定 + 新ステータス値の順
-- ステータス値 + タスク指定の順でも可（例: `archived 1`）
+- ステータス値 + タスク指定の順でも可（例: `Archived 1`）
 
 **ステータス値の解決:**
 - 入力値が STATUS_ACTIVE_VALUES / STATUS_DONE_VALUES / STATUS_ARCHIVED_VALUES / STATUS_OTHER_VALUES のいずれかに含まれる → その値を使用
 - 含まれない → そのまま値として設定し、`⚠ "hoge" は設定未定義ですが更新しました` と警告を添える
 
-**処理:**
 ```
 notion-update-page(
   page_id: {対象ページID},
   command: "update_properties",
-  properties: { "{PROP_STATUS}": "{解決した新ステータス値}" }
+  properties: { "Status": "{解決した新ステータス値}" }
 )
 ```
 
 **出力（1行のみ）:**
 ```
-🔄 "レポート作成" のステータスを "アーカイブ" に変更しました
+🔄 "レポート作成" のステータスを "Archived" に変更しました
 （一覧を更新するには /mytasks と入力してください）
 ```
 
@@ -190,17 +206,20 @@ notion-update-page(
 必須: タスク名。不明な場合は確認を求める。
 
 **処理:**
+
+まず `notion-fetch(id=DATABASE_URL)` を実行して `<data-source url="collection://...">` から `data_source_id` を取得する。
+
 ```
 notion-create-pages(
   parent: { data_source_id: "{data_source_id}" },
   pages: [{
     properties: {
-      "{PROP_TITLE}": "{タスク名}",
-      "{PROP_ASSIGNEE}": "{MY_USER_ID}",
-      "date:{PROP_DEADLINE}:start": "{期限 or null}",
-      "date:{PROP_DEADLINE}:is_datetime": 0,
-      "{PROP_PRIORITY}": "{優先度 or null}",
-      "{PROP_PROJECT}": "{プロジェクト名 or null}"
+      "Task Name": "{タスク名}",
+      "Assignee": "{MY_USER_ID}",
+      "date:締切:start": "{期限 or null}",
+      "date:締切:is_datetime": 0,
+      "Priority": "{優先度 or null}",
+      "Project": "{プロジェクト名 or null}"
     }
   }]
 )
@@ -208,7 +227,7 @@ notion-create-pages(
 
 **出力（1行のみ）:**
 ```
-✅ "議事録作成" を追加しました（期限: 2026/03/10、優先度: 高）
+✅ "議事録作成" を追加しました（期限: 2026/03/10、優先度: High）
 （一覧を更新するには /mytasks と入力してください）
 ```
 
@@ -218,20 +237,18 @@ notion-create-pages(
 
 **処理:**
 ```
-1. タスク特定（DONE モードと同様）
+1. タスク特定（共通ヘルパー参照）
 2. 削除前に確認:
    "「レポート作成」を削除しますか？（この操作は元に戻せません）[yes/no]"
 3. yes / y / はい → 処理続行
    no / n / いいえ → "キャンセルしました" で終了
-4. notion-update-page でステータスを削除済みを示す特殊値に変更する
+4. notion-update-page でステータスを Archived に変更する
    ※ Notion MCP にはページ削除 API がないため、ステータス変更で代替。
-     STATUS_OTHER_VALUES に "削除済み" を追加して管理するか、
-     Notion 上で直接削除するよう案内する。
 ```
 
 **出力（1行のみ）:**
 ```
-🗑 "レポート作成" を削除しました（Notion 上でアーカイブ済み）
+🗑 "レポート作成" を Archived にしました（Notion 上で直接削除する場合はブラウザから行ってください）
 （一覧を更新するには /mytasks と入力してください）
 ```
 
@@ -247,8 +264,8 @@ notion-update-page(
   page_id: {対象ページID},
   command: "update_properties",
   properties: {
-    "date:{PROP_DEADLINE}:start": "{新しい日付 YYYY-MM-DD}",
-    "date:{PROP_DEADLINE}:is_datetime": 0
+    "date:締切:start": "{新しい日付 YYYY-MM-DD}",
+    "date:締切:is_datetime": 0
   }
 )
 ```
@@ -265,7 +282,7 @@ notion-update-page(
 
 - **差分表示厳守**: VIEW / VIEW-ALL / VIEW-FILTER 以外のモードでは絶対にタスクテーブルを再表示しない。操作確認は1行のみ。
 - **番号の一時性**: `#1`, `#2` 等の番号はこのセッション（会話）内のみ有効。次回 `/mytasks` 実行時に番号が変わりうることをユーザーに認識させる。
-- **エラー時**: Notion API エラーが発生した場合はエラー内容を表示し「設定のプロパティ名・DATABASE_URL を確認してください」と案内する。
+- **エラー時**: Python スクリプトがエラーを返した場合は stderr の内容をそのまま表示する。`~/.notion_token` 不足の場合はセットアップ手順を案内する。
 - **People プロパティ**: 担当者フィールドはユーザーIDの文字列を直接受け付ける（notion-get-users で取得した id を使用）。
 
 ---
@@ -276,19 +293,19 @@ notion-update-page(
 /mytasks                              → アクティブタスク一覧
 /mytasks list                         → アクティブタスク一覧（明示的）
 /mytasks all                          → 全ステータスのタスク一覧
-/mytasks 完了                         → 完了タスクの一覧
-/mytasks archived                     → アーカイブ済みタスクの一覧
-/mytasks 保留                         → 保留タスクの一覧
+/mytasks Done                         → 完了タスクの一覧
+/mytasks Archived                     → アーカイブ済みタスクの一覧
+/mytasks Paused                       → 保留タスクの一覧
 
 /mytasks 1 done                       → #1 を完了
 /mytasks done レポート作成             → 名前で完了
 /mytasks #2 終わった                  → #2 を完了
 
-/mytasks status 1 アーカイブ          → #1 をアーカイブ
-/mytasks 1 → 保留                     → #1 を保留に変更
-/mytasks move 2 to 進行中             → #2 を進行中に変更
-/mytasks archived 1                   → #1 をアーカイブ（STATUS モード）
-/mytasks レポート → 完了               → 名前でステータス変更
+/mytasks status 1 Archived            → #1 をアーカイブ
+/mytasks 1 → Paused                   → #1 を保留に変更
+/mytasks move 2 to In progress        → #2 を進行中に変更
+/mytasks Archived 1                   → #1 をアーカイブ（STATUS モード）
+/mytasks レポート → Done               → 名前でステータス変更
 
 /mytasks add 議事録作成                → タスク追加
 /mytasks add 資料準備 期限 3/10 高    → 期限・優先度付きで追加

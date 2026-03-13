@@ -22,31 +22,54 @@ Claude Code の `/mytasks` コマンドで Notion のタスクを管理します
 - **Claude Code**（デスクトップ版）がインストールされていること
 - **Notion MCP** が接続済みであること
   - Claude Code → 設定 → Connections → Notion が「Connected」になっていることを確認
+- **Notion Integration Token** が設定済みであること（後述）
 
 ## インストール
 
-### 方法1: コマンドファイルのみコピー（シンプル・推奨）
+### 方法1: ファイルをコピー（シンプル・推奨）
 
 ```bash
-# ~/.claude/commands/ がなければ作成
-mkdir -p ~/.claude/commands
+# ディレクトリ作成
+mkdir -p ~/.claude/commands ~/.claude/scripts
 
 # コマンドファイルをダウンロード
 curl -o ~/.claude/commands/mytasks.md \
   https://raw.githubusercontent.com/EarthSherpa/claude-notion-mytasks/main/commands/mytasks.md
+
+# Python スクリプトをダウンロード（全件取得に必要）
+curl -o ~/.claude/scripts/notion_tasks.py \
+  https://raw.githubusercontent.com/EarthSherpa/claude-notion-mytasks/main/scripts/notion_tasks.py
+chmod +x ~/.claude/scripts/notion_tasks.py
 ```
 
 Claude Code を再起動すると `/mytasks` コマンドが使えるようになります。
 
-### 方法2: リポジトリをクローンしてプラグインとして使用
+### 方法2: リポジトリをクローン
 
 ```bash
 git clone https://github.com/EarthSherpa/claude-notion-mytasks.git ~/claude-plugins/notion-mytasks
+mkdir -p ~/.claude/commands ~/.claude/scripts
+cp ~/claude-plugins/notion-mytasks/commands/mytasks.md ~/.claude/commands/
+cp ~/claude-plugins/notion-mytasks/scripts/notion_tasks.py ~/.claude/scripts/
+chmod +x ~/.claude/scripts/notion_tasks.py
 ```
 
-Claude Code の設定 → Plugins → Add Plugin からクローンしたパスを指定。
-
 ## 初期設定
+
+### 0. Notion Integration Token の取得（必須）
+
+`/mytasks` は Notion Database Query API を直接呼び出してタスクを全件取得します。これには Integration Token が必要です。
+
+1. [https://www.notion.so/my-integrations](https://www.notion.so/my-integrations) を開く
+2. **「+ 新しいインテグレーション」** をクリック
+3. 名前（例: `claude-mytasks`）を入力し、ワークスペースを選択して保存
+4. 表示された **Internal Integration Token**（`secret_xxx...`）をコピー
+5. ターミナルで保存:
+   ```bash
+   echo 'secret_xxx...' > ~/.notion_token
+   chmod 600 ~/.notion_token
+   ```
+6. Notion でタスクデータベースを開き、右上の **「...」** → **「コネクト先」** → 作成したインテグレーションを追加
 
 ### 1. データベースURLの設定
 
@@ -135,12 +158,18 @@ STATUS_OTHER_VALUES:    保留               ← その他のステータス
 
 ## トラブルシューティング
 
-**「タスクが見つかりませんでした」と表示される**
-- `PROP_ASSIGNEE` の値が Notion のプロパティ名と完全一致しているか確認（大文字小文字・スペースも含む）
-- Notion DB で自分が担当者として設定されているか確認
+**「Notion token not found」エラーが出る**
+- `~/.notion_token` にトークンが保存されているか確認: `cat ~/.notion_token`
+- インテグレーションがタスク DB に接続されているか Notion 側で確認（DB → 「...」→「コネクト先」）
+
+**「「タスクが見つかりませんでした」と表示される**
+- Notion DB で自分が「Assignee」として設定されているか確認
 - `STATUS_ACTIVE_VALUES` に実際のステータス値が含まれているか確認
 
-**ツールエラーが出る**
+**Notion API エラー 403 が出る**
+- インテグレーションがタスク DB に接続されていない。Notion で DB を開いて「コネクト先」にインテグレーションを追加する
+
+**ツールエラーが出る（MCP 関連）**
 - Claude Code を再起動
 - 設定 → Connections → Notion を再接続
 
