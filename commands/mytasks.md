@@ -14,17 +14,17 @@ allowed-tools: [mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp
 
 ```
 DATABASE_URL: https://www.notion.so/earth-sherpa/173deb5fc5da80b1b650e8af4cecbeb3?v=191deb5fc5da80c98e0c000c439373c6&source=copy_link
-PROP_TITLE:     タスク名
-PROP_ASSIGNEE:  担当者
-PROP_STATUS:    ステータス
-PROP_DEADLINE:  期限
-PROP_PRIORITY:  優先度
-PROP_PROJECT:   プロジェクト
+PROP_TITLE:     Task Name
+PROP_ASSIGNEE:  Assignee
+PROP_STATUS:    Status
+PROP_DEADLINE:  締切
+PROP_PRIORITY:  Priority
+PROP_PROJECT:   Project
 
-STATUS_ACTIVE_VALUES:   未着手, 進行中, In Progress, Todo
-STATUS_DONE_VALUES:     完了, Done, Completed
-STATUS_ARCHIVED_VALUES: アーカイブ, Archived
-STATUS_OTHER_VALUES:    保留, On Hold, Blocked
+STATUS_ACTIVE_VALUES:   Not started, In progress
+STATUS_DONE_VALUES:     Done
+STATUS_ARCHIVED_VALUES: Archived
+STATUS_OTHER_VALUES:    Paused, Blocked
 ```
 
 > **DATABASE_URL の設定方法**: Notion でタスクデータベースを開き、URL（例: `https://www.notion.so/...`）をコピーして `SETUP_REQUIRED` と置き換えてください。
@@ -77,9 +77,13 @@ STATUS_OTHER_VALUES:    保留, On Hold, Blocked
 **データ取得:**
 ```
 1. notion-fetch(id=DATABASE_URL) を実行して <data-source url="collection://..."> タグから data_source_id を取得
-2. notion-search(query="", data_source_url="collection://{data_source_id}") で全ページを取得
+2. notion-search(query=" ", data_source_url="collection://{data_source_id}") で全ページを取得
+   ※ query="" は API エラーになるため必ず1文字以上を指定する（空白1文字で全件取得できる）
+   ※ レスポンスに continuation トークンがあれば続けて取得し、全ページを集める
 3. 以下の条件でフィルタリング:
-   - PROP_ASSIGNEE プロパティが MY_USER_ID を含む
+   - PROP_ASSIGNEE プロパティの値に MY_USER_ID が含まれる
+     ※ People プロパティは "user://USER_ID" 形式または mention-user タグで格納される。
+       MY_USER_ID の文字列が値中に含まれているかを確認する。
    - ステータス条件（モードによる）:
      - VIEW:        STATUS_ACTIVE_VALUES に含まれる
      - VIEW-ALL:    フィルタなし（全ステータス）
