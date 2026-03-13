@@ -110,16 +110,44 @@ def query_all(db_id, token, user_id, status_filter=None):
     return all_pages
 
 
-def extract_tasks(pages):
+def fetch_page_title(page_id, token):
+    """GET /v1/pages/{id} してタイトルプロパティを返す"""
+    result = notion_request(f"/pages/{page_id}", token)
+    props = result.get("properties", {})
+    for prop in props.values():
+        if prop.get("type") == "title":
+            return "".join(i.get("plain_text", "") for i in prop.get("title", []))
+    return ""
+
+
+def resolve_project_names(pages, token):
+    """全タスクのプロジェクトIDを収集し、名前に解決して辞書を返す"""
+    all_ids = set()
+    for page in pages:
+        for rel in page.get("properties", {}).get("Project", {}).get("relation", []):
+            all_ids.add(rel["id"])
+    id_to_name = {}
+    for pid in all_ids:
+        try:
+            id_to_name[pid] = fetch_page_title(pid, token)
+        except Exception:
+            id_to_name[pid] = ""
+    return id_to_name
+
+
+def extract_tasks(pages, token):
+    id_to_name = resolve_project_names(pages, token)
     tasks = []
     for p in pages:
+        rel_ids = [r["id"] for r in p.get("properties", {}).get("Project", {}).get("relation", [])]
+        project_name = ", ".join(id_to_name.get(rid, "") for rid in rel_ids)
         tasks.append({
             "id": p["id"],
             "title": get_prop(p, "Task Name", "title"),
             "status": get_prop(p, "Status", "status"),
             "deadline": get_prop(p, "締切", "date"),
             "priority": get_prop(p, "Priority", "select"),
-            "project": get_prop(p, "Project", "select"),
+            "project": project_name,
         })
     return tasks
 
@@ -134,7 +162,7 @@ def main():
 
     token = get_token()
     pages = query_all(args.db_id, token, args.user_id, args.status)
-    tasks = extract_tasks(pages)
+    tasks = extract_tasks(pages, token)
 
     if args.format == "json":
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
