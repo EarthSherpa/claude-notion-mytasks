@@ -1,6 +1,6 @@
 ---
 description: Notion タスク一覧の表示・追加・完了・ステータス変更・削除
-argument-hint: [list|all|add <名前>|done <名前/番号>|status <名前/番号> <値>|delete <名前/番号>]
+argument-hint: [list|all|summary|add <名前>|done <名前/番号>|status <名前/番号> <値>|delete <名前/番号>]
 allowed-tools: [Bash, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-get-users, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-fetch, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-create-pages, mcp__1a4cd6f2-d31d-4d15-9817-259147b769eb__notion-update-page]
 ---
 
@@ -53,7 +53,8 @@ STATUS_OTHER_VALUES:    Paused, Blocked
 **判定順序（上から順に評価）:**
 
 1. **VIEW-ALL**: `all`, `すべて`, `全部` を含む
-2. **ADD**: `add`, `追加`, `新規`, `create`, `new`, `作成`, `作って`, `入れて` を含む
+2. **VIEW-SUMMARY**: `summary`, `概要`, `サマリー`, `詳細` を含む（`add` と共存しない場合のみ）
+3. **ADD**: `add`, `追加`, `新規`, `create`, `new`, `作成`, `作って`, `入れて` を含む
 3. **DELETE**: `delete`, `削除`, `消して`, `remove`, `消す` を含む
 4. **DEADLINE**: `期限変更`, `due`, `deadline`, `〆切`, `締め切り` を含む（ただし `add` と共存する場合は ADD モードで処理）
 5. **STATUS**: 以下のいずれかに該当する
@@ -61,14 +62,14 @@ STATUS_OTHER_VALUES:    Paused, Blocked
    - `→` を含む（例: `1 → 保留`）
    - 設定の全 STATUS_*_VALUES に含まれる値 + タスク名/番号の組み合わせ（例: `archived 1`, `保留 レポート`）
 6. **DONE**: `done`, `完了`, `終わった`, `finish`, `finished`, `済み`, `ok`, `やった` を含み、かつタスク名または番号が続く
-7. **VIEW-FILTER**: 設定の STATUS_*_VALUES に含まれる値**のみ**（タスク名/番号なし）（例: `完了`, `archived`, `保留`）
-8. **VIEW**: `$ARGUMENTS` が空、または `list`, `一覧`, `show`, `表示`, `ls` を含む
+8. **VIEW-FILTER**: 設定の STATUS_*_VALUES に含まれる値**のみ**（タスク名/番号なし）（例: `完了`, `archived`, `保留`）
+9. **VIEW**: `$ARGUMENTS` が空、または `list`, `一覧`, `show`, `表示`, `ls` を含む
 
 ---
 
 ## 各モードの処理
 
-### VIEW / VIEW-ALL / VIEW-FILTER モード
+### VIEW / VIEW-ALL / VIEW-FILTER / VIEW-SUMMARY モード
 
 **データ取得（Python スクリプト経由）:**
 
@@ -88,12 +89,18 @@ python3 ~/.claude/scripts/notion_tasks.py \
 python3 ~/.claude/scripts/notion_tasks.py \
   --db-id {DB_ID} --user-id {MY_USER_ID} \
   --status {指定ステータス値...} --format json
+
+# VIEW-SUMMARY（アクティブ + ページ本文サマリー付き、並列取得で約2-3秒）
+python3 ~/.claude/scripts/notion_tasks.py \
+  --db-id {DB_ID} --user-id {MY_USER_ID} \
+  --status "Not started" "In progress" --with-summary --format json
 ```
 
 スクリプトは JSON 配列を出力する。各要素の構造:
 ```json
 {"id": "page-uuid", "title": "タスク名", "status": "In progress",
- "deadline": "2026-03-10", "priority": "High", "project": "営業"}
+ "deadline": "2026-03-10", "priority": "High", "project": "営業",
+ "summary": "ページ本文の先頭150文字（--with-summary 時のみ）"}
 ```
 
 このリストを `#1`, `#2`, ... として番号付けし、後続の操作で参照できるよう保持する。
@@ -119,6 +126,20 @@ python3 ~/.claude/scripts/notion_tasks.py \
 | 2 | 議事録 | 総務 | - | - | Done |
 （番号はこのセッション中のみ有効です）
 ```
+
+**VIEW-SUMMARY の表示フォーマット（サマリー行を各タスクの下に追加）:**
+```
+| # | タスク | プロジェクト | 期限 | 優先度 |
+|---|--------|------------|------|-------|
+| 1 | レポート作成 | 営業部 | 2026/03/10 | High |
+|   | 📝 第3四半期の売上レポート。営業チームからのデータ収集後、CFOへ提出… |  |  |  |
+| 2 | 会議準備 | 総務 | 2026/03/15 | Medium |
+| 3 | 請求書確認 | 経理 | - | - |
+|   | 📝 先月分の請求書を3件確認。支払い済み2件、未払い1件（田中商事）を… |  |  |  |
+（番号はこのセッション中のみ有効です）
+```
+※ `summary` が空のタスクはサマリー行を省略する（空行を出さない）。
+※ JSON の `summary` フィールドをそのまま表示（スクリプト側で150文字に切り詰め済み）。
 
 タスクが0件の場合: `該当するタスクはありませんでした。`
 
@@ -293,6 +314,8 @@ notion-update-page(
 /mytasks                              → アクティブタスク一覧
 /mytasks list                         → アクティブタスク一覧（明示的）
 /mytasks all                          → 全ステータスのタスク一覧
+/mytasks summary                      → アクティブタスク一覧 + ページ本文サマリー付き（2-3秒）
+/mytasks 概要                         → 同上（日本語でも可）
 /mytasks Done                         → 完了タスクの一覧
 /mytasks Archived                     → アーカイブ済みタスクの一覧
 /mytasks Paused                       → 保留タスクの一覧

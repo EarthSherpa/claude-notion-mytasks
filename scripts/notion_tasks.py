@@ -13,6 +13,7 @@ import urllib.error
 import os
 import argparse
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_token():
@@ -75,7 +76,6 @@ def query_all(db_id, token, user_id, status_filter=None):
         "people": {"contains": user_id},
     }
     if status_filter and len(status_filter) == 1:
-        # Combine with status filter using AND
         filter_body = {
             "and": [
                 {"property": "Assignee", "people": {"contains": user_id}},
@@ -135,6 +135,85 @@ def resolve_project_names(pages, token):
     return id_to_name
 
 
+# ── サマリー取得 ──────────────────────────────────────────────
+
+# テキストを抽出できるブロックタイプ（優先: 段落・リスト・引用 / 低優先: 見出し）
+_BODY_BLOCK_TYPES = {
+    "paragraph", "bulleted_list_item", "numbered_list_item", "quote", "callout",
+}
+_HEADING_BLOCK_TYPES = {"heading_1", "heading_2", "heading_3"}
+
+
+def _extract_block_text(block):
+    """1ブロックからプレーンテキストを返す（空なら空文字）"""
+    btype = block.get("type", "")
+    if btype not in (_BODY_BLOCK_TYPES | _HEADING_BLOCK_TYPES):
+        return ""
+    rich = block.get(btype, {}).get("rich_text", [])
+    return "".join(r.get("plain_text", "") for r in rich)
+
+
+def fetch_page_summary(page_id, token, max_chars=150):
+    """ページ本文の先頭テキストを最大 max_chars 文字で返す。内容がなければ空文字。
+
+    段落・リスト・引用を優先し、それらがなければ見出しにフォールバック。
+    「Description」のような1語の見出しは除外。
+    """
+    try:
+        result = notion_request(f"/blocks/{page_id}/children?page_size=30", token)
+    except Exception:
+        return ""
+
+    blocks = result.get("results", [])
+
+    def collect(block_types, min_len=0):
+        parts, total = [], 0
+        for block in blocks:
+            if block.get("type") not in block_types:
+                continue
+            text = _extract_block_text(block).strip()
+            if not text or len(text) <= min_len:
+                continue
+            remaining = max_chars - total
+            if remaining <= 0:
+                break
+            parts.append(text[:remaining])
+            total += len(text)
+            if total >= max_chars:
+                break
+        return " ".join(parts)
+
+    # 段落・リスト・引用を優先
+    summary = collect(_BODY_BLOCK_TYPES)
+    # なければ20文字超の見出しにフォールバック（"Description" 等の1語ラベルを除外）
+    if not summary:
+        summary = collect(_HEADING_BLOCK_TYPES, min_len=20)
+
+    if len(summary) >= max_chars:
+        summary = summary[:max_chars].rstrip() + "…"
+    return summary
+
+
+def fetch_summaries_parallel(page_ids, token, max_workers=10):
+    """複数ページのサマリーを並列取得して {page_id: summary} を返す"""
+    results = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_id = {
+            executor.submit(fetch_page_summary, pid, token): pid
+            for pid in page_ids
+        }
+        for future in as_completed(future_to_id):
+            pid = future_to_id[future]
+            try:
+                results[pid] = future.result()
+            except Exception:
+                results[pid] = ""
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
+
+
 def extract_tasks(pages, token):
     id_to_name = resolve_project_names(pages, token)
     tasks = []
@@ -148,6 +227,7 @@ def extract_tasks(pages, token):
             "deadline": get_prop(p, "締切", "date"),
             "priority": get_prop(p, "Priority", "select"),
             "project": project_name,
+            "summary": "",  # --with-summary 時に後から埋める
         })
     return tasks
 
@@ -158,11 +238,19 @@ def main():
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--status", nargs="*", help="Status values to include (default: all)")
     parser.add_argument("--format", choices=["json", "table"], default="json")
+    parser.add_argument("--with-summary", action="store_true",
+                        help="Fetch page body summaries (extra API calls, ~2-3s)")
     args = parser.parse_args()
 
     token = get_token()
     pages = query_all(args.db_id, token, args.user_id, args.status)
     tasks = extract_tasks(pages, token)
+
+    # サマリーを並列取得して埋め込む
+    if args.with_summary and tasks:
+        summaries = fetch_summaries_parallel([t["id"] for t in tasks], token)
+        for t in tasks:
+            t["summary"] = summaries.get(t["id"], "")
 
     if args.format == "json":
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
@@ -170,13 +258,16 @@ def main():
         if not tasks:
             print("該当するタスクはありませんでした。")
             return
+        has_summary = args.with_summary
         print("| # | タスク | プロジェクト | 期限 | 優先度 | ステータス |")
         print("|---|--------|------------|------|-------|-----------|")
         for i, t in enumerate(tasks, 1):
             deadline = t["deadline"] or "-"
             priority = t["priority"] or "-"
-            project = t["project"] or "-"
+            project  = t["project"]  or "-"
             print(f"| {i} | {t['title']} | {project} | {deadline} | {priority} | {t['status']} |")
+            if has_summary and t.get("summary"):
+                print(f"|   | 📝 {t['summary']} |  |  |  |  |")
         print("（番号はこのセッション中のみ有効です）")
 
 
